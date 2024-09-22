@@ -8,6 +8,8 @@ curl -L $DOWNLOAD_URL -o alist
 
 chmod +x alist
 
+chmod +x alist-freebsd.sh
+
 if [ -f "./data/config.json" ]; then
     echo "Alist-FreeBSD最新版本已经下载覆盖完成！"
 else
