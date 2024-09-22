@@ -1,6 +1,6 @@
 #!/bin/sh
 
-API_URL="https://api.github.com/ansoncloud8/am-alist-freebsd/releases/latest"
+API_URL="https://github.com/ansoncloud8/am-alist-freebsd/releases/latest/download/alist"
 
 DOWNLOAD_URL=$(curl -s $API_URL | jq -r ".assets[] | select(.name | contains(\"alist\")) | .browser_download_url")
 
