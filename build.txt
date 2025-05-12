@@ -1,0 +1,155 @@
+#!/bin/bash
+
+check_and_install() {
+    local package_name=$1
+    local command_name=$2
+
+    if ! command -v "$command_name" &> /dev/null; then
+        echo "$command_name 未安装"
+        pkg install "$package_name" -y
+    else
+        echo "$command_name 已安装"
+    fi
+}
+
+clone_and_extract() {
+# 克隆 alist 主仓库（通过 ghproxy 加速）
+git clone https://ghproxy.com/https://github.com/alist-org/alist.git
+cd alist
+
+# 下载 AlistGo beta 版前端资源（替换原 alist-web 内容）
+curl -L "https://ghproxy.com/https://github.com/AlistGo/alist/releases/download/beta/dist.tar.gz" -o dist.tar.gz
+
+# 解压并覆盖到 public 目录
+rm -rf public/dist
+tar -zxvf dist.tar.gz -C public/
+
+# 清理临时文件
+rm dist.tar.gz
+ 
+    tar -zxvf dist.tar.gz 
+    rm -rf public/dist 
+    mv -f dist public 
+    rm -rf dist.tar.gz
+}
+
+build_app() {
+    # 设置 GOPROXY 环境变量
+    export GOPROXY="https://goproxy.cn,direct"
+
+    # 设置变量
+    appName="alist"
+    builtAt=$(date +"%F %T %z")
+    goVersion=$(go version | awk '{print $3}')
+    gitAuthor=$(git show -s --format=format:%aN'<'%ae'>' HEAD)
+    gitCommit=$(git log --pretty=format:%h -1)
+    version=$(git describe | awk -F 'v|-.*' '{print $2}')
+    webVersion=$(wget -qO- -t1 -T2 'https://api.github.com/repos/alist-org/alist-web/releases/latest' | awk -F'"|:|,| ' '/tag_name/{print $3}')
+
+    # 构建 ldflags 字符串
+    ldflags="-w -s \
+        -X 'github.com/alist-org/alist/v3/internal/conf.BuiltAt=$builtAt' \
+        -X 'github.com/alist-org/alist/v3/internal/conf.GoVersion=$goVersion' \
+        -X 'github.com/alist-org/alist/v3/internal/conf.GitAuthor=$gitAuthor' \
+        -X 'github.com/alist-org/alist/v3/internal/conf.GitCommit=$gitCommit' \
+        -X 'github.com/alist-org/alist/v3/internal/conf.Version=$version' \
+        -X 'github.com/alist-org/alist/v3/internal/conf.WebVersion=$webVersion'"
+
+    # 执行 go build 命令
+    go build -ldflags="$ldflags" .
+}
+
+cleanup() {
+    rm -rf "./alist"
+}
+# 检查 storage 文件夹是否存在
+if [ ! -d "${HOME}/storage" ]; then
+    echo "storage 文件夹不存在请授权"
+    sleep 1
+    termux-setup-storage
+fi
+
+# 替换清华源
+sed -i 's@^\(deb.*stable main\)$@#\1\ndeb https://mirrors.tuna.tsinghua.edu.cn/termux/apt/termux-main stable main@' $PREFIX/etc/apt/sources.list
+
+# 检查并安装所需命令
+check_and_install "git" "git"
+check_and_install "wget" "wget"
+check_and_install "golang" "go"
+
+# 清理旧版本代码及构建结果
+cleanup
+
+# 克隆并提取最新代码
+clone_and_extract
+
+# 构建应用
+build_app
+
+# 等待 alist 文件生成
+timeout=$(( $(date +%s) + 600 ))  # 设置超时10分钟
+
+while [ ! -f "./alist" ]
+do
+    if [ "$(date +%s)" -gt "$timeout" ]; then
+        echo "等待超时，未找到 alist 文件"
+        exit 1
+    fi
+
+    sleep 5
+done
+
+ls
+
+echo "编译版本: $version"
+
+read -p "是否要执行复制备份操作？(y/n) " choice
+
+# 判断用户的选择
+if [[ "$choice" == "y" || "$choice" == "Y" ]]; then
+    echo "开始执行命令..."
+    
+    if [ ! -d "$PREFIX/bin/alist" ]; then
+        echo "termux未安装alist尝试检查模块目录"
+        
+       if su -c ls /data/adb/modules/Alist_nox/bin/alist >/dev/null 2>&1; then
+            # /data/adb/modules/Alist_nox/bin/alist 目录存在，执行相关命令
+            echo "Alist_nox 目录存在"
+            # 执行命令...
+            su -c "cp -rf alist \"/data/adb/modules/Alist_nox/bin/alist\" && chmod 755 \"/data/adb/modules/Alist_nox/bin/alist\"" && echo "已复制 alist 文件到模块 /data/adb/modules/Alist_nox/bin/ 目录"
+        elif su -c ls /data/adb/modules/Alist/bin/alist >/dev/null 2>&1; then
+            # /data/adb/modules/Alist/bin/alist 目录存在，执行相关命令
+            echo "Alist 目录存在"
+            # 执行命令...
+            su -c "cp -rf alist \"/data/adb/modules/Alist/bin/alist\" && chmod 755 \"/data/adb/modules/Alist/bin/alist\"" && echo "已复制 alist 文件到模块 /data/adb/modules/Alist/bin/ 目录"
+        else
+            # 两个目录都不存在，执行相应的操作
+            echo "模块目录不存在"
+            # 执行命令...
+        fi
+        
+    else
+        # $PREFIX/bin/alist 目录存在，执行相关命令
+        echo "termux已安装alist尝试复制"
+        # 执行命令...
+        cp -rf alist "$PREFIX/bin/alist" && echo "已复制 alist 文件到 $PREFIX/bin/alist 目录 重启 termux"
+    fi
+    
+    mkdir -p "/storage/emulated/0/Download/alist_${version}_aarch64/"
+    cp -rf ./alist "/storage/emulated/0/Download/alist_${version}_aarch64/alist"
+    
+    if [ -f "/storage/emulated/0/Download/alist_${version}_aarch64/alist" ]; then
+        echo "已复制 alist 文件到 /storage/emulated/0/Download/alist_${version}_aarch64/ 目录备份"
+    else
+        echo "复制到目录失败"
+    fi
+    
+    su -c "pkill -f 'alist'" >/dev/null
+    
+    # 执行其他命令...
+    
+else
+    # 用户选择不执行
+    echo "取消执行."
+
+
